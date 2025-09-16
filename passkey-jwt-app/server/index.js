@@ -9,80 +9,80 @@ const {
   verifyAuthenticationResponse,
 } = require('@simplewebauthn/server');
 const { isoUint8Array, isoBase64URL } = require('@simplewebauthn/server/helpers');
+const { PrismaClient } = require('./generated/prisma/client');
 
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: process.env.ORIGIN })); // Allow requests from our React app
+app.use(cors({ origin: process.env.ORIGIN }));
 
-// --- In-Memory "Database" ---
-// !!WARNING!!: This is for demonstration purposes only.
-// In a real application, you would use a proper database (e.g., PostgreSQL, MongoDB).
-const users = {};
+const prisma = new PrismaClient();
 
 // --- Relying Party Info ---
 const rpName = process.env.RP_NAME;
 const rpID = process.env.RP_ID;
 const origin = process.env.ORIGIN;
 
-// 1. REGISTRATION - GENERATE CHALLENGE
+
 app.post('/register-challenge', async (req, res) => {
   const { username } = req.body;
   if (!username) {
     return res.status(400).json({ error: 'Username is required' });
   }
-  if (users[username]) {
+  const existingUser = await prisma.user.findUnique({ where: { username } });
+  if (existingUser) {
     return res.status(400).json({ error: 'Username already taken' });
   }
-  // Create a new user structure
-  users[username] = {
-    username,
-    authenticators: [],
-  };
   const options = await generateRegistrationOptions({
     rpName,
     rpID,
-    userID: isoUint8Array.fromUTF8String(username), // Convert to Uint8Array
+    userID: isoUint8Array.fromUTF8String(username),
     userName: username,
     attestationType: 'none',
-    // Exclude credentials that have already been registered by this user
-    excludeCredentials: users[username].authenticators.map(auth => ({
-      id: auth.credentialID,
-      type: 'public-key',
-      transports: auth.transports,
-    })),
+    // For new user, no excludeCredentials
+    excludeCredentials: [],
   });
-  // Store the challenge temporarily
-  users[username].challenge = options.challenge;
+
+  await prisma.user.create({
+    data: {
+      username,
+      currentChallenge: options.challenge,
+    },
+  });
   res.json(options);
 });
 
-// 2. REGISTRATION - VERIFY RESPONSE
+
 app.post('/register-verify', async (req, res) => {
   const { username, response } = req.body;
-  const user = users[username];
+  const user = await prisma.user.findUnique({ where: { username } });
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
   try {
     const verification = await verifyRegistrationResponse({
       response,
-      expectedChallenge: user.challenge,
+      expectedChallenge: user.currentChallenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
     });
     if (verification.verified) {
-      // Save the new authenticator
+      
       const { credential } = verification.registrationInfo;
-      const auth = {
-        credentialID: credential.id, // Base64URLString
-        credentialPublicKey: credential.publicKey, // Uint8Array
-        counter: credential.counter,
-        transports: credential.transports ?? [],
-      };
-      user.authenticators.push(auth);
-      // Clean up challenge
-      delete user.challenge;
-      console.log('Registration successful:', auth);
+      await prisma.authenticator.create({
+        data: {
+          credentialID: credential.id, 
+          credentialPublicKey: Buffer.from(credential.publicKey), 
+          counter: BigInt(credential.counter),
+          transports: credential.transports ?? [],
+          userId: user.id,
+        },
+      });
+  
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { currentChallenge: null },
+      });
+      console.log('Registration successful');
       res.json({ verified: true });
     } else {
       res.status(400).json({ verified: false, error: 'Verification failed' });
@@ -93,33 +93,42 @@ app.post('/register-verify', async (req, res) => {
   }
 });
 
-// 3. LOGIN - GENERATE CHALLENGE
+
 app.post('/login-challenge', async (req, res) => {
   const { username } = req.body;
-  const user = users[username];
+  const user = await prisma.user.findUnique({
+    where: { username },
+    include: { authenticators: true },
+  });
   if (!user || user.authenticators.length === 0) {
     return res.status(404).json({ error: 'User not found or no authenticators registered' });
   }
   const options = await generateAuthenticationOptions({
     allowCredentials: user.authenticators.map(auth => ({
-      id: auth.credentialID, // Base64URLString
+      id: auth.credentialID,
       type: 'public-key',
       transports: auth.transports,
     })),
   });
-  // Store the challenge temporarily
-  user.challenge = options.challenge;
+
+  await prisma.user.update({
+    where: { id: user.id },
+    data: { currentChallenge: options.challenge },
+  });
   res.json(options);
 });
 
-// 4. LOGIN - VERIFY RESPONSE AND CREATE JWT
+
 app.post('/login-verify', async (req, res) => {
   const { username, response } = req.body;
-  const user = users[username];
+  const user = await prisma.user.findUnique({
+    where: { username },
+    include: { authenticators: true },
+  });
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
-  // Find the authenticator that was used for this login attempt
+
   const authenticator = user.authenticators.find(
     auth => auth.credentialID === response.id
   );
@@ -129,22 +138,28 @@ app.post('/login-verify', async (req, res) => {
   try {
     const verification = await verifyAuthenticationResponse({
       response,
-      expectedChallenge: user.challenge,
+      expectedChallenge: user.currentChallenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
       credential: {
-        id: authenticator.credentialID, // Base64URLString
-        publicKey: authenticator.credentialPublicKey, // Uint8Array
-        counter: authenticator.counter,
+        id: authenticator.credentialID,
+        publicKey: new Uint8Array(authenticator.credentialPublicKey),
+        counter: Number(authenticator.counter),
         transports: authenticator.transports,
       },
     });
     if (verification.verified) {
       // IMPORTANT: Update the authenticator's counter
-      authenticator.counter = verification.authenticationInfo.newCounter;
-      // Clean up challenge
-      delete user.challenge;
-      // Create a JWT
+      await prisma.authenticator.update({
+        where: { id: authenticator.id },
+        data: { counter: BigInt(verification.authenticationInfo.newCounter) },
+      });
+    
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { currentChallenge: null },
+      });
+    
       const token = jwt.sign(
         { username: user.username },
         process.env.JWT_SECRET,
@@ -173,7 +188,6 @@ function verifyToken(req, res, next) {
 }
 
 app.get('/profile', verifyToken, (req, res) => {
-  // In a real app, you'd fetch this from the database
   res.json({
     message: `Welcome, ${req.user.username}! This is a protected resource.`,
   });
