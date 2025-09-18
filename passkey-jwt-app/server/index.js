@@ -22,6 +22,9 @@ const rpName = process.env.RP_NAME;
 const rpID = process.env.RP_ID;
 const origin = process.env.ORIGIN;
 
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
 
 app.post('/register-challenge', async (req, res) => {
   const { username } = req.body;
@@ -193,7 +196,7 @@ app.get('/profile', verifyToken, (req, res) => {
   });
 });
 
-const port = 3001;
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Server listening on port ${PORT}`);
 });
