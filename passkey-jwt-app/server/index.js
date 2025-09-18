@@ -8,13 +8,21 @@ const {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } = require('@simplewebauthn/server');
-const { isoUint8Array, isoBase64URL } = require('@simplewebauthn/server/helpers');
+const { isoUint8Array } = require('@simplewebauthn/server/helpers');
 const { PrismaClient } = require('./generated/prisma/client');
 
 const app = express();
 app.use(express.json());
-app.use(cors({ origin: process.env.ORIGIN }));
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000'
+];
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true, // if needed
+}));
 const prisma = new PrismaClient();
 
 // --- Relying Party Info ---
