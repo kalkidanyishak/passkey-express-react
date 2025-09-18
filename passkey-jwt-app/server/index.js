@@ -199,7 +199,7 @@ function verifyToken(req, res, next) {
 
 app.get('/profile', verifyToken, (req, res) => {
   res.json({
-    message: `Welcome, ${req.user.username}! This is a protected resource.`,
+    message: `${req.user.username}`,
   });
 });
 
