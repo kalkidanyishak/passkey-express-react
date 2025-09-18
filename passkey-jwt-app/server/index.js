@@ -21,7 +21,6 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: allowedOrigins,
-  credentials: true, // if needed
 }));
 const prisma = new PrismaClient();
 
@@ -100,7 +99,7 @@ app.post('/register-verify', async (req, res) => {
     }
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error });
   }
 });
 
