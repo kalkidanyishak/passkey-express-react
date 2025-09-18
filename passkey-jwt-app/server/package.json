@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build": "npx prisma generate",
+    "dev": "nodemon index.js",
+    "build": "echo 'Nothing to build'",
+    "postinstall": "prisma generate",
     "start": "node index.js"
   },
   "keywords": [],
