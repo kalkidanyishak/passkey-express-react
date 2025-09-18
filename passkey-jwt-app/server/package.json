@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "build": "prisma generate",
+    "build": "npx prisma generate",
     "start": "node index.js"
   },
   "keywords": [],
