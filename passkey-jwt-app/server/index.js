@@ -182,7 +182,7 @@ app.post('/login-verify', async (req, res) => {
     }
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error });
   }
 });
 
