@@ -185,6 +185,25 @@ app.post('/login-verify', async (req, res) => {
   }
 });
 
+app.get("/check-username/:username", async (req, res) => {
+  const { username } = req.params;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { username },
+    });
+
+    if (user) {
+      return res.json({ available: false, message: "Username is already taken" });
+    }
+
+    res.json({ available: true, message: "Username is available" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Something went wrong" });
+  }
+});
+
 // --- Protected Route ---
 function verifyToken(req, res, next) {
   const authHeader = req.headers['authorization'];
@@ -203,24 +222,7 @@ app.get('/profile', verifyToken, (req, res) => {
   });
 });
 
-app.get("/check-username/:username", verifyToken, async (req, res) => {
-  const { username } = req.params;
 
-  try {
-    const user = await prisma.user.findUnique({
-      where: { username },
-    });
-
-    if (user) {
-      return res.json({ available: false, message: "Username is already taken" });
-    }
-
-    res.json({ available: true, message: "Username is available" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Something went wrong" });
-  }
-});
 
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
